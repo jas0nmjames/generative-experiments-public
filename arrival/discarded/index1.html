@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Arrival‑style Logogram — gritty v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --w: 560px; }
+  body { font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; display:grid; gap:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input[type=text]{ width:min(780px,100%); padding:.5rem .7rem; }
+  input[type=range], input[type=number]{ width:200px }
+  button { padding:.55rem .9rem; font:inherit }
+  svg { width:var(--w); height:var(--w); background:#fff; border:1px solid #e6e6e6; box-shadow:0 1px 10px #0001 }
+  .pill { padding:.25rem .55rem; border-radius:999px; font-size:12px; background:#f2f2f2 }
+  .meter { width:160px; height:10px; background:#eee; border-radius:6px; overflow:hidden; box-shadow: inset 0 0 0 1px #0001 }
+  .meter>span { display:block; height:100%; width:0%; transition:width .2s ease }
+  .ok   { background:#37b24d } .warn { background:#f59f00 } .bad  { background:#e03131 }
+  #warning { color:#e03131; font-size:13px; display:none }
+  label { display:flex; gap:6px; align-items:center }
+</style>
+</head>
+<body>
+
+<div class="row">
+  <input id="txt" type="text" placeholder="type something…" value="we are so bound by time" maxlength="32" />
+  <button id="go">Render</button>
+  <button id="dl">Download SVG</button>
+  <span id="chars" class="pill">0 / 32 chars</span>
+  <span id="tokens" class="pill">0 / 6 tokens (after stopwords)</span>
+</div>
+
+<div class="row">
+  <label>Sectors <input id="sectors" type="number" min="48" max="128" value="64"></label>
+  <label>Base radius <input id="radius" type="number" min="180" max="420" value="300"></label>
+  <label>Max stroke <input id="smax" type="number" min="6" max="90" value="34"></label>
+  <label>Smoothing <input id="smooth" type="range" min="0" max="6" step="1" value="3"></label>
+  <label>Seed <input id="seed" type="number" min="0" max="999999" value="13"></label>
+</div>
+
+<div class="row">
+  <label>Inkiness <input id="inkiness" type="range" min="0" max="100" value="70"></label>
+  <label>Grit <input id="grit" type="range" min="0" max="100" value="55"></label>
+  <label>Bleed <input id="bleed" type="range" min="0" max="100" value="45"></label>
+  <label>Splatters <input id="splats" type="range" min="0" max="100" value="55"></label>
+  <div class="meter" title="Legibility">
+    <span id="meterBar" class="ok"></span>
+  </div>
+  <span id="meterLabel" class="pill">density: 0%</span>
+  <span id="warning">Too much for one mark—shorten text or reduce sectors.</span>
+</div>
+
+<svg id="svg" viewBox="-520 -520 1040 1040" role="img" aria-label="Arrival-style logogram">
+  <defs>
+    <!-- MASTER gritty filter: multi-scale warp + feather + threshold + grain -->
+    <filter id="gritty" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
+      <!-- Macro warp -->
+      <feTurbulence type="turbulence" baseFrequency="0.006" numOctaves="2" seed="7" result="macro"/>
+      <feDisplacementMap in="SourceGraphic" in2="macro" scale="6" xChannelSelector="R" yChannelSelector="G" result="warp1"/>
+      <!-- Micro warp -->
+      <feTurbulence type="turbulence" baseFrequency="0.025" numOctaves="3" seed="11" result="micro"/>
+      <feDisplacementMap in="warp1" in2="micro" scale="2.5" xChannelSelector="R" yChannelSelector="G" result="warp2"/>
+      <!-- Slight feather (paper soften) -->
+      <feGaussianBlur in="warp2" stdDeviation="0.7" result="soft"/>
+      <!-- Edge threshold (rag) -->
+      <feComponentTransfer in="soft" result="ink">
+        <feFuncA type="table" tableValues="0 0 0 0.3 0.75 1 1 1"/>
+      </feComponentTransfer>
+      <!-- Paper grain multiply -->
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="grain"/>
+      <feColorMatrix in="grain" type="saturate" values="0"/>
+      <feBlend in="ink" in2="grain" mode="multiply" result="grittyOut"/>
+    </filter>
+
+    <!-- Erosion speckle mask: knocks tiny holes through ink -->
+    <filter id="erosion" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="turbulence" baseFrequency="0.08" numOctaves="2" seed="19" result="noise"/>
+      <!-- more contrasty noise -->
+      <feComponentTransfer in="noise">
+        <feFuncR type="gamma" amplitude="1" exponent="0.7" offset="0"/>
+        <feFuncG type="gamma" amplitude="1" exponent="0.7" offset="0"/>
+        <feFuncB type="gamma" amplitude="1" exponent="0.7" offset="0"/>
+      </feComponentTransfer>
+      <feColorMatrix type="matrix" values="
+        0 0 0 0  0
+        0 0 0 0  0
+        0 0 0 0  0
+        0 0 0 2 -1" result="alphaCut"/> <!-- bumps alpha contrast -->
+    </filter>
+
+    <!-- Blob gradient for splatters -->
+    <radialGradient id="blob" r="1">
+      <stop offset="0" stop-color="#000"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Paper backdrop (very subtle vignette) -->
+  <radialGradient id="paperGrad" cx="50%" cy="45%" r="70%">
+    <stop offset="0" stop-color="#fff"/>
+    <stop offset="1" stop-color="#f7f7f7"/>
+  </radialGradient>
+  <rect x="-520" y="-520" width="1040" height="1040" fill="url(#paperGrad)"/>
+
+  <!-- Ink group takes gritty filter; we also layer a mask for erosion -->
+  <g id="maskHost" opacity="0.98">
+    <mask id="speckleMask">
+      <!-- White = keep; black = hole. We start with solid and subtract noise later via JS -->
+      <rect x="-520" y="-520" width="1040" height="1040" fill="#fff"/>
+      <!-- JS will append <g filter="url(#erosion)">noise</g> with low opacity to eat away ink -->
+    </mask>
+    <g id="mark" filter="url(#gritty)" mask="url(#speckleMask)"></g>
+  </g>
+</svg>
+
+<script>
+const $ = s => document.querySelector(s);
+const svgNS = "http://www.w3.org/2000/svg";
+
+/* Policy */
+const MAX_CHARS=32, MAX_TOKENS=6, D1=0.55, DMAX=1.10;
+const STOP = new Set(['a','an','the','of','to','in','and','for','on','with','is','are','be','as','by','at','from','that','this','it','was','were']);
+
+/* Utils */
+function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
+function lerp(a,b,t){ return a + (b-a)*t; }
+function mulberry32(s){ let t=s>>>0; return ()=>{ t|=0; t=t+0x6D2B79F5|0; let r=Math.imul(t^t>>>15,1|t); r^=r+Math.imul(r^r>>>7,61|r); return ((r^r>>>14)>>>0)/4294967296; } }
+function fnv1a(str){ let h=0x811c9dc5; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=(h+((h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24)))>>>0; } return h>>>0; }
+function toksFiltered(s){ return s.trim().split(/\s+/).filter(Boolean).filter(w=>!STOP.has(w.toLowerCase())); }
+function densityOf(W,th=0.04){ let a=0; for(const v of W) if(v>th)a++; return a/W.length; }
+
+/* Text → weights */
+function textToWeights(text,N,smoothK=3){
+  const s=text.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'');
+  const letters=s.replace(/[^a-z0-9 .,!?'-]/g,'');
+  const W=new Float32Array(N); if(!letters.trim()) return W;
+  const phase=fnv1a(letters)%N;
+  for(let i=0;i<letters.length-1;i++){
+    const a=letters[i], b=letters[i+1]; if(/\s/.test(a+b)) continue;
+    const h=fnv1a(a+b); const idx=(phase+(h%N))%N;
+    const isV=/[aeiou]/.test(b); const amp=0.5+((h>>>8)&255)/255*0.5; const bias=isV?1.15:1.0;
+    W[idx]+=amp*bias;
+  }
+  for(const ch of letters){ if(/[.!?]/.test(ch)) zero(W,phase,4); if(/[,;:]/.test(ch)) zero(W,phase,2,0.65); }
+  const mx=Math.max(1e-6, Math.max(...W)); for(let i=0;i<N;i++) W[i]/=mx;
+  if(smoothK>0){
+    const out=new Float32Array(N), kernel=[]; for(let k=-smoothK;k<=smoothK;k++){ kernel.push(Math.exp(-(k*k)/(2*(smoothK*0.6)*(smoothK*0.6)))); }
+    const denom=kernel.reduce((a,b)=>a+b,0);
+    for(let i=0;i<N;i++){ let acc=0; for(let k=-smoothK;k<=smoothK;k++){ const j=(i+k+N)%N; acc+=W[j]*kernel[k+smoothK]; } out[i]=acc/denom; }
+    return out;
+  }
+  return W;
+  function zero(arr,c,r,f=0){ for(let k=-r;k<=r;k++){ const j=(c+k+arr.length)%arr.length; arr[j]*=f; } }
+}
+
+/* Geometry */
+function arcPath(cx,cy,r,a0,a1){ const x0=cx+r*Math.cos(a0), y0=cy+r*Math.sin(a0), x1=cx+r*Math.cos(a1), y1=cy+r*Math.sin(a1); const large=(a1-a0)%(Math.PI*2)>Math.PI?1:0; return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`; }
+
+/* Draw with calligraphic pressure + more blobs */
+function drawRing(W,R,Smax,predicate,rng,style){
+  const g=$("#mark");
+  const N=W.length, seg=(2*Math.PI)/N, gap=0.008;
+  // random pen angle modulates width across arc
+  const penAngle = rng()*Math.PI*2;
+  for(let i=0;i<N;i++){
+    if(!predicate(i)) continue;
+    const w=W[i]; if(w<=0.02) continue;
+
+    // base stroke with pressure jitter over arc length
+    const swBase = lerp(6, Smax, Math.pow(w, 0.85));
+    const passes = 2 + Math.round(lerp(0,2,w)); // more ink for strong sectors
+    const a0 = -Math.PI/2 + i*seg + gap, a1 = -Math.PI/2 + (i+1)*seg - gap;
+
+    for(let p=0;p<passes;p++){
+      const rr = R * (1 + (rng()*2-1)*0.01*(1+w));
+      const path = document.createElementNS(svgNS,"path");
+      path.setAttribute("d", arcPath(0,0, rr, a0, a1));
+      path.setAttribute("fill","none");
+      path.setAttribute("stroke","#000");
+
+      // pressure/taper: vary width sinusoidally across the small arc
+      const phase = penAngle + i*0.3 + p*0.7;
+      const amp = 0.55 + 0.45*Math.sin(phase);
+      const jitter = 0.85 + rng()*0.3;
+      path.setAttribute("stroke-width", swBase * amp * jitter);
+
+      path.setAttribute("stroke-linecap","round");
+      path.setAttribute("stroke-linejoin","round");
+      g.appendChild(path);
+    }
+
+    // caps & burrs
+    if(w>0.4 && rng()<style.capProb){
+      const end = rng()<0.5?a0:a1;
+      placeSplatterNear(R,end, w, rng, style);
+    }
+  }
+}
+
+/* Splatter placement: blobs + streaks with gradient */
+function placeSplatterNear(R, angle, w, rng, style){
+  const host=$("#mark");
+  const count = 1 + Math.floor(rng()*2);
+  for(let k=0;k<count;k++){
+    const r = (5 + w*20)* (0.4 + rng()*1.2) * style.splatScale;
+    const d = (rng()<0.5? -1:1) * (6 + rng()*24);
+    const x = (R + d)*Math.cos(angle) + (rng()*2-1)*8;
+    const y = (R + d)*Math.sin(angle) + (rng()*2-1)*8;
+
+    if(rng() < 0.7){ // round blob
+      const c=document.createElementNS(svgNS,"circle");
+      c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", r);
+      c.setAttribute("fill","url(#blob)"); c.setAttribute("opacity", 0.8);
+      host.appendChild(c);
+    } else { // streak
+      const e=document.createElementNS(svgNS,"ellipse");
+      const elong = 1.8 + rng()*2.5;
+      e.setAttribute("cx", x); e.setAttribute("cy", y);
+      e.setAttribute("rx", r*elong); e.setAttribute("ry", r*0.4);
+      e.setAttribute("fill","url(#blob)"); e.setAttribute("opacity", 0.75);
+      e.setAttribute("transform", `rotate(${(angle*180/Math.PI)+rng()*30})`);
+      host.appendChild(e);
+    }
+  }
+}
+
+/* Speckle erosion: update mask with noise rectangles (cheap) */
+function applyErosionMask(strength){
+  const mask = $("#speckleMask");
+  // Remove old noise
+  [...mask.querySelectorAll(".noiseChunk")].forEach(n=>n.remove());
+  if(strength<=0) return;
+  const g=document.createElementNS(svgNS,"g");
+  g.setAttribute("class","noiseChunk");
+  g.setAttribute("filter","url(#erosion)");
+  g.setAttribute("opacity", strength); // 0..1
+  // Fill with mid gray so filter can carve alpha
+  const r=document.createElementNS(svgNS,"rect");
+  r.setAttribute("x","-520"); r.setAttribute("y","-520"); r.setAttribute("width","1040"); r.setAttribute("height","1040");
+  r.setAttribute("fill","#888");
+  g.appendChild(r);
+  mask.appendChild(g);
+}
+
+/* UI + policy + render */
+function updateCounters(){
+  const raw=$("#txt").value; $("#chars").textContent=`${raw.length} / ${MAX_CHARS} chars`;
+  const t=toksFiltered(raw).slice(0,MAX_TOKENS); $("#tokens").textContent=`${t.length} / ${MAX_TOKENS} tokens (after stopwords)`;
+}
+function updateMeter(d){
+  const pct=Math.round(d*100), bar=$("#meterBar"), label=$("#meterLabel");
+  bar.style.width=clamp(pct,0,110)+"%";
+  label.textContent=`density: ${pct}%`;
+  bar.className = pct<=D1*100 ? "ok" : (pct<=DMAX*100 ? "warn" : "bad");
+}
+
+function render(){
+  const input=$("#txt"); if(input.value.length>MAX_CHARS) input.value=input.value.slice(0,MAX_CHARS);
+  const toks=toksFiltered(input.value).slice(0,MAX_TOKENS);
+  const text=toks.join(' '); updateCounters();
+
+  const N=+$("#sectors").value|0, R=+$("#radius").value, Smax=+$("#smax").value, smoothK=+$("#smooth").value|0, seed=+$("#seed").value|0;
+  const inkiness=+$("#inkiness").value/100, grit=+$("#grit").value/100, bleed=+$("#bleed").value/100, splats=+$("#splats").value/100;
+  const rng=mulberry32(seed);
+
+  const W=textToWeights(text,N,smoothK);
+  const d=densityOf(W); updateMeter(d);
+  $("#warning").style.display="none";
+  const mark=$("#mark"); mark.innerHTML="";
+
+  // erosion mask strength ~ grit
+  applyErosionMask(0.2 + grit*0.6);
+
+  // style knobs
+  const style = {
+    capProb: 0.35 + inkiness*0.3,     // more ink → more caps
+    splatScale: 0.6 + inkiness*0.8
+  };
+
+  if(d>DMAX){ $("#warning").style.display="inline"; return; }
+
+  // Two-ring split if dense
+  if(d>D1){
+    const idx=[...W.keys()].sort((a,b)=>W[b]-W[a]), half=Math.floor(N/2);
+    const outer=new Set(idx.slice(0,half));
+    drawRing(W,R,        Smax*(0.95+inkiness*0.4), (i)=>outer.has(i),     rng, style);
+    drawRing(W,R-26,     Smax*0.7,                  (i)=>!outer.has(i),   rng, style);
+  }else{
+    drawRing(W,R,        Smax*(0.9+inkiness*0.5),   ()=>true,              rng, style);
+  }
+
+  // Global bleed = duplicate mark, blur + low alpha behind
+  if(bleed>0.01){
+    const clone=mark.cloneNode(true);
+    clone.removeAttribute("filter"); // blur on clean shapes
+    clone.setAttribute("opacity", 0.08 + bleed*0.25);
+    // wrap in group with gaussian blur
+    const wrap=document.createElementNS(svgNS,"g");
+    const fId="f"+Math.floor(Math.random()*1e9);
+    const f=document.createElementNS(svgNS,"filter"); f.setAttribute("id",fId);
+    f.innerHTML = `<feGaussianBlur stdDeviation="${1 + bleed*2.5}"/>`;
+    $("#svg defs").appendChild(f);
+    wrap.setAttribute("filter", `url(#${fId})`);
+    wrap.appendChild(clone);
+    mark.before(wrap);
+  }
+
+  // Global gritty filter intensity tweak (scale displacement via primitiveUnits is not trivial at runtime)
+  // So we nudge opacity of the ink group slightly by inkiness
+  $("#maskHost").setAttribute("opacity", 0.94 + inkiness*0.06);
+
+  // Random free splatters proportional to splats knob & density
+  const splatCount = Math.round( (6 + inkiness*10) * splats * (0.6 + d) );
+  for(let i=0;i<splatCount;i++){
+    const angle=rng()*Math.PI*2, dist=(R-20) + (rng()*2-1)*40;
+    placeSplatterNear(dist, angle, 0.7, rng, style);
+  }
+}
+
+$("#txt").addEventListener("input", updateCounters);
+$("#go").addEventListener("click", render);
+$("#dl").addEventListener("click", ()=>{
+  const svg=$("#svg").cloneNode(true); svg.removeAttribute("width"); svg.removeAttribute("height");
+  const blob=new Blob([new XMLSerializer().serializeToString(svg)], {type:"image/svg+xml;charset=utf-8"});
+  const a=Object.assign(document.createElement("a"),{ href:URL.createObjectURL(blob), download:"logogram-gritty.svg" }); a.click(); URL.revokeObjectURL(a.href);
+});
+updateCounters(); render();
+</script>
+
+</body>
+</html>
