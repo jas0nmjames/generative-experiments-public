@@ -2,6 +2,8 @@
 
 Building things I couldn't before, [at great expense](https://www.youtube.com/watch?v=8enXRDlWguU "YouTube - Novara Media: Aaron Bastani Meets Karen Hao").
 
+[![Netlify Status](https://api.netlify.com/api/v1/badges/769a3641-bd52-46b5-be77-0f2717473002/deploy-status)](https://app.netlify.com/projects/jas0nmjames-experiments/deploys)
+
 ## [Arrival](arrival)
 
 An image generator and decoder for '[Heptapod B](https://www.youtube.com/watch?v=me9uliPVqeU)', the logogram alien language in the film [Arrival](https://www.youtube.com/watch?v=oGI9hSl0q-w) (2016)
