@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Arrival Logogram — Cinematic + GPU Ink Plate</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --panel: rgba(20,28,34,.55);
+    --hud:#cfe1e8; --hud-dim:#8da0a9;
+    --glass:#0e1418;
+    --parx: 0; --pary: 0; /* parallax set in JS when cinematic on */
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; color:var(--hud);
+    background: radial-gradient(1200px 800px at 60% 30%, #1a2329 0%, #141c22 40%, #0b1013 100%);
+    overflow:auto;  /* whole page scroll */
+  }
+
+  /* Fixed fog/backplate (only visible in cinematic mode) */
+  .fogWrap{position:fixed; inset:-10%; pointer-events:none; opacity:.85; display:none}
+  body.cinematic .fogWrap{display:block}
+  .fog,.fog::before,.fog::after{
+    position:absolute; inset:-20%;
+    background:
+      radial-gradient(60% 50% at 40% 40%, rgba(255,255,255,.045), transparent 60%),
+      radial-gradient(35% 30% at 70% 60%, rgba(255,255,255,.035), transparent 70%),
+      radial-gradient(50% 40% at 30% 70%, rgba(255,255,255,.03), transparent 70%);
+    filter: blur(10px) saturate(.8);
+    animation: drift 70s linear infinite;
+    mix-blend-mode:screen;
+  }
+  .fog{opacity:.75; transform:translate3d(calc(var(--parx)*2%), calc(var(--pary)*1%), 0)}
+  .fog::before{content:""; inset:-20%; opacity:.55; animation-duration:95s; animation-direction:reverse;}
+  .fog::after{content:""; inset:-20%; opacity:.45; animation-duration:120s;}
+  @keyframes drift{0%{transform:translate3d(-5%,0,0) scale(1.05)}50%{transform:translate3d(6%,1%,0) scale(1.08)}100%{transform:translate3d(-5%,0,0) scale(1.05)}}
+
+  /* Layout */
+  .stage{
+    display:grid; gap:16px; align-items:start;
+    grid-template-columns: 1fr min(1280px, 72vw) minmax(360px, 460px) 1fr;
+    padding:24px 0; min-height:100dvh;
+  }
+  @media (max-width:1100px){
+    .stage{grid-template-columns: 1fr min(96vw, 1000px) 1fr}
+  }
+
+  /* Viewport (cinematic glass) */
+  .viewport{
+    grid-column:2;
+    background:linear-gradient(to bottom, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    border:16px solid var(--glass); border-radius:14px;
+    padding:16px;
+  }
+  body.cinematic .viewport{
+    box-shadow: inset 0 0 0 1px #151c21, inset 0 0 120px rgba(0,0,0,.6), 0 20px 60px rgba(0,0,0,.45);
+  }
+  .viewwrap{position:relative; width:100%; aspect-ratio:1/1; display:grid; place-items:center}
+  body.cinematic .viewwrap{
+    background: radial-gradient(60% 45% at 50% 50%, rgba(183,195,201,.16), rgba(0,0,0,0) 70%);
+  }
+
+  /* Ink plate (canvas) + SVG overlay */
+  #ink{position:absolute; inset:16px; width:calc(100% - 32px); height:calc(100% - 32px)}
+  #svg{position:absolute; inset:16px; width:calc(100% - 32px); height:calc(100% - 32px); transform: translate3d(calc(var(--parx)*0.4%), calc(var(--pary)*0.4%), 0)}
+
+  /* HUD (right column) */
+  .hud{
+    grid-column:3; display:grid; gap:12px;
+    background: var(--panel); border:1px solid rgba(255,255,255,.06);
+    border-radius:12px; padding:14px;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 10px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .panel h2{margin:0 0 6px; font:600 12px/1.2 ui-sans-serif; letter-spacing:.18em; text-transform:uppercase; color:#d7e1e6}
+  .sub{color:var(--hud-dim); font-size:12px; margin-bottom:8px}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  input[type=text]{flex:1 1 auto; min-width:220px; padding:.55rem .7rem; color:#e9f0f3; background:linear-gradient(to bottom, rgba(255,255,255,.08), rgba(255,255,255,.03)); border:1px solid rgba(255,255,255,.18); border-radius:10px; outline:none}
+  input[type=number],input[type=range],input[type=checkbox]{accent-color:#91b6c3}
+  button{padding:.55rem .85rem; border-radius:10px; border:1px solid rgba(255,255,255,.18); background:linear-gradient(to bottom, rgba(145,182,195,.28), rgba(145,182,195,.18)); color:#0b1013; font-weight:600; letter-spacing:.02em; cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  .pill{padding:.25rem .55rem; border-radius:999px; font-size:12px; background:rgba(200,230,240,.12); border:1px solid rgba(255,255,255,.12)}
+  details summary{cursor:pointer; color:#d7e1e6; margin-bottom:6px}
+  pre.payload{white-space:pre-wrap; color:#cfe1e8; background:rgba(255,255,255,.04); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,.08); max-height:none; overflow:visible}
+
+  /* Reflection strip (subtle, cinematic only) */
+  .reflection{display:none}
+  body.cinematic .reflection{display:block; position:absolute; inset:0; pointer-events:none; opacity:.12; filter:blur(1.4px); transform:translateY(3px)}
+</style>
+</head>
+<body class="cinematic">
+
+<!-- Fixed fog background (cinematic) -->
+<div class="fogWrap">
+  <div class="fog"></div>
+</div>
+
+<div class="stage">
+  <!-- Main viewport -->
+  <section class="viewport" id="viewport">
+    <div class="viewwrap" id="viewwrap">
+      <canvas id="ink" width="1024" height="1024"></canvas>
+
+      <svg id="svg" viewBox="-520 -520 1040 1040" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Arrival-style logogram">
+        <defs>
+          <pattern id="inkTex" patternUnits="userSpaceOnUse" width="28" height="28">
+            <rect width="28" height="28" fill="#000"/>
+            <g opacity="0.08">
+              <circle cx="6" cy="7" r="2" fill="#fff"/>
+              <circle cx="20" cy="13" r="1.6" fill="#fff"/>
+              <rect x="14" y="3" width="3" height="1" fill="#fff"/>
+            </g>
+          </pattern>
+        </defs>
+        <g id="dataLayer" style="display:none"></g>
+        <g id="artHost" opacity="0.98"><g id="mark"></g></g>
+      </svg>
+
+      <div class="reflection">
+        <svg viewBox="-520 -520 1040 1040" id="refl" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- Right HUD -->
+  <aside class="hud">
+    <!-- Generate -->
+    <section class="panel" id="genPanel">
+      <h2>Generate</h2>
+      <div class="sub">Type → Render → (optional) GPU Ink Plate</div>
+      <div class="row">
+        <input id="txt" type="text" placeholder="enter message…" value="we are so bound by time" maxlength="32" />
+        <button id="go">Render</button>
+        <button id="dl">Download SVG</button>
+      </div>
+      <div class="row">
+        <label><input id="gpuToggle" type="checkbox" checked> GPU Ink Plate</label>
+        <label><input id="cineToggle" type="checkbox" checked> Cinematic mode</label>
+        <label>Size <input id="px" type="number" min="512" max="2048" step="256" value="1024"></label>
+        <span class="pill" id="status">ready</span>
+      </div>
+      <div class="row">
+        <label>Sectors <input id="sectors" type="number" min="48" max="128" value="64"></label>
+        <label>Radius <input id="radius" type="number" min="180" max="420" value="300"></label>
+        <label>Max stroke <input id="smax" type="number" min="6" max="90" value="36"></label>
+        <label>Smoothing <input id="smooth" type="range" min="0" max="6" step="1" value="3"></label>
+        <label>Seed offset <input id="seed" type="number" min="0" max="999999" value="0"></label>
+      </div>
+    </section>
+
+    <!-- Decode -->
+    <section class="panel" id="decPanel">
+      <h2>Decode</h2>
+      <div class="sub">Upload a saved v3 SVG (or decode current)</div>
+      <div class="row">
+        <label>Choose SVG <input id="fileInput" type="file" accept=".svg,image/svg+xml"></label>
+        <button id="decodeCurrent">Decode current</button>
+        <button id="copyDecoded">Copy JSON</button>
+        <span id="decodeStatus" class="pill">Idle</span>
+      </div>
+      <details id="decodeDetails" open>
+        <summary>Decoded payload</summary>
+        <pre id="decodeOut" class="payload">—</pre>
+      </details>
+    </section>
+  </aside>
+</div>
+
+<script>
+/* ========= Deterministic vector engine + metadata (decodable) ========= */
+const svgNS="http://www.w3.org/2000/svg";
+const SALT="heptapod_v3_2025_08", STOP=new Set(['a','an','the','of','to','in','and','for','on','with','is','are','be','as','by','at','from','that','this','it','was','were']);
+const $=s=>document.querySelector(s);
+
+function fnv1a(str){let h=0x811c9dc5;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=(h+((h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24)))>>>0;}return h>>>0;}
+const toksFiltered=s=>s.trim().split(/\s+/).filter(Boolean).filter(w=>!STOP.has(w.toLowerCase()));
+
+function textToWeights(text,N=64,smoothK=3){
+  const s=text.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,''), letters=s.replace(/[^a-z0-9 .,!?'-]/g,'');
+  const W=new Float32Array(N); if(!letters.trim()) return W; const phase=fnv1a(letters)%N;
+  for(let i=0;i<letters.length-1;i++){const a=letters[i],b=letters[i+1]; if(/\s/.test(a+b))continue; const h=fnv1a(a+b), idx=(phase+(h%N))%N; const amp=0.5+((h>>>8)&255)/255*0.5; W[idx]+=amp*(/[aeiou]/.test(b)?1.15:1.0);}
+  for(const ch of letters){if(/[.!?]/.test(ch)) zero(W,phase,4); if(/[,;:]/.test(ch)) zero(W,phase,2,0.65);}
+  const mx=Math.max(1e-6,Math.max(...W)); for(let i=0;i<N;i++) W[i]/=mx;
+  if(smoothK>0){const out=new Float32Array(N), kernel=[]; for(let k=-smoothK;k<=smoothK;k++) kernel.push(Math.exp(-(k*k)/(2*(smoothK*0.6)*(smoothK*0.6)))); const denom=kernel.reduce((a,b)=>a+b,0);
+    for(let i=0;i<N;i++){let acc=0; for(let k=-smoothK;k<=smoothK;k++){const j=(i+k+N)%N; acc+=W[j]*kernel[k+smoothK]; } out[i]=acc/denom; } return out;}
+  return W;
+  function zero(arr,c,r,f=0){for(let k=-r;k<=r;k++){const j=(c+k+arr.length)%arr.length;arr[j]*=f;}}
+}
+function arcPath(r,a0,a1){const x0=r*Math.cos(a0), y0=r*Math.sin(a0), x1=r*Math.cos(a1), y1=r*Math.sin(a1); const large=(a1-a0)%(Math.PI*2)>Math.PI?1:0; return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;}
+function writeMetadata(payload){const host=$("#dataLayer"); const old=host.querySelector("#logogram-metadata"); if(old) old.remove();
+  const meta={version:"v3",salt:SALT,text:payload.text,tokens:payload.toks,params:{N:payload.N,R:payload.R,Smax:payload.Smax,smoothing:payload.smoothK,seed:payload.seed},weights:Array.from(payload.W)};
+  const s=document.createElementNS(svgNS,"script"); s.setAttribute("id","logogram-metadata"); s.setAttribute("type","application/json"); s.textContent=JSON.stringify(meta); host.appendChild(s);}
+
+function renderVector(text){
+  const N=+$("#sectors").value|0, R=+$("#radius").value, Smax=+$("#smax").value, smoothK=+$("#smooth").value|0, seedOffset=+$("#seed").value|0;
+  const toks=toksFiltered(text).slice(0,6); const clean=toks.join(' ');
+  const seed=fnv1a(`${SALT}|${clean}|N=${N}|R=${R}|S=${Smax}|sm=${smoothK}`)^seedOffset;
+  const W=textToWeights(clean,N,smoothK);
+  $("#dataLayer").innerHTML=""; $("#mark").innerHTML="";
+  const start=-Math.PI/2, seg=(2*Math.PI)/N;
+  for(let i=0;i<N;i++){
+    const w=W[i]; if(w<=0.02) continue;
+    const p=document.createElementNS(svgNS,"path");
+    p.setAttribute("d", arcPath(R, start+i*seg, start+(i+1)*seg));
+    p.setAttribute("fill","none"); p.setAttribute("stroke","url(#inkTex)"); p.setAttribute("stroke-width", (6 + w*(Smax-6)).toFixed(2));
+    $("#mark").appendChild(p);
+    const d=document.createElementNS(svgNS,"path");
+    d.setAttribute("d", arcPath(R, start+i*seg, start+(i+1)*seg));
+    d.setAttribute("data-sector", String(i)); d.setAttribute("data-weight", w.toFixed(5)); d.setAttribute("fill","none");
+    $("#dataLayer").appendChild(d);
+  }
+  writeMetadata({text:clean,toks,N,R,Smax,smoothK,seed,W});
+  // reflection content
+  const refl=$("#refl"); if(refl){refl.innerHTML = $("#mark").outerHTML.replace('id="mark"',''); refl.setAttribute("transform","scale(1,-1) translate(0,-20)");}
+  return {W,N,R,seed};
+}
+
+/* ==================== Decoder (unchanged) ==================== */
+function decodeLogogram(svgSource){
+  let svgDoc;
+  if(typeof svgSource==="string"){svgDoc=new DOMParser().parseFromString(svgSource,"image/svg+xml").documentElement;}
+  else if(svgSource && svgSource.tagName==="svg"){svgDoc=svgSource;}
+  else throw new Error("Pass SVG string or <svg> element");
+  let meta=null; const el=svgDoc.querySelector("#logogram-metadata"); if(el&&el.textContent){try{meta=JSON.parse(el.textContent);}catch{}}
+  if(!meta){const arcs=[...svgDoc.querySelectorAll("#dataLayer path[data-sector]")]; if(!arcs.length) throw new Error("No metadata or data-layer arcs found.");
+    const weights=new Array(arcs.length).fill(0); arcs.forEach(p=>{weights[+p.getAttribute("data-sector")] = parseFloat(p.getAttribute("data-weight"));});
+    meta={version:"unknown",text:null,tokens:[],params:{N:arcs.length},weights};}
+  return {text:meta.text||null,tokens:meta.tokens||[],params:meta.params||{},weights:meta.weights||[]};
+}
+
+/* ==================== GPU Ink Plate Worker (turbulence + halo) ==================== */
+const workerSrc = `
+self.onmessage = async (e)=>{
+  const msg=e.data;
+  if(msg.cmd!=="render") return;
+  const {size, weights, N, R, seed, Smax} = msg;
+  try{
+    const off = new OffscreenCanvas(size,size);
+    const ctx = off.getContext("2d", {alpha:true});
+    ctx.clearRect(0,0,size,size);
+    ctx.translate(size/2,size/2);
+    ctx.strokeStyle = "black"; ctx.lineCap="round"; ctx.lineJoin="round";
+    const start=-Math.PI/2, seg=(Math.PI*2)/N;
+    for(let i=0;i<N;i++){
+      const w = weights[i]; if(w<=0.02) continue;
+      ctx.lineWidth = 6 + w*(Smax-6);
+      const a0=start + i*seg, a1=start + (i+1)*seg;
+      ctx.beginPath(); ctx.arc(0,0,R,a0,a1,false); ctx.stroke();
+    }
+
+    const gl = off.getContext("webgl2", {preserveDrawingBuffer:false});
+    if(!gl){ const bmp = await createImageBitmap(off); self.postMessage({ok:true, bitmap:bmp}, [bmp]); return; }
+
+    const quadVS = \`#version 300 es
+    in vec2 p; out vec2 vUv;
+    void main(){ vUv=(p+1.0)*0.5; gl_Position=vec4(p,0.0,1.0); }\`;
+    function prog(fs){ const vs=gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs,quadVS); gl.compileShader(vs);
+      const fsS=gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fsS,fs); gl.compileShader(fsS);
+      const pr=gl.createProgram(); gl.attachShader(pr,vs); gl.attachShader(pr,fsS); gl.linkProgram(pr); return pr; }
+    const quad=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,quad);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+
+    function makeTex(w,h,filter=true){ const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,filter?gl.LINEAR:gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,filter?gl.LINEAR:gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null); return t; }
+    const fbo=gl.createFramebuffer(), texA=makeTex(size,size,true), texB=makeTex(size,size,true);
+
+    const srcTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,size,size,0,gl.RGBA,gl.UNSIGNED_BYTE, off.transferToImageBitmap?await createImageBitmap(off):null);
+
+    function pass(toTex, program, binds){ gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, toTex, 0);
+      gl.viewport(0,0,size,size); gl.useProgram(program);
+      const loc=gl.getAttribLocation(program,"p");
+      gl.bindBuffer(gl.ARRAY_BUFFER,quad); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+      binds&&binds(); gl.drawArrays(gl.TRIANGLE_STRIP,0,4); }
+
+    const fsDisp = \`#version 300 es
+    precision highp float;
+    in vec2 vUv; out vec4 frag;
+    uniform sampler2D uTex; uniform vec2 uRes; uniform float uSeed; uniform float uAmt;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453 + uSeed*1e-4); }
+    float n(vec2 p){ vec2 i=floor(p), f=fract(p); float a=h(i), b=h(i+vec2(1,0)), c=h(i+vec2(0,1)), d=h(i+vec2(1,1));
+      vec2 u=f*f*(3.0-2.0*f); return mix(a,b,u.x)+(c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y; }
+    float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<5;i++){ v+=a*n(p); p*=2.0; a*=0.5; } return v; }
+    void main(){ vec2 px=1.0/uRes; vec2 n2=vec2(fbm(vUv*6.0), fbm(vUv*6.0+19.73));
+      vec2 d=(n2-0.5)*(uAmt)*px; frag=texture(uTex, vUv + d); }\`;
+    const progDisp = prog(fsDisp);
+
+    const fsHalo = \`#version 300 es
+    precision highp float; in vec2 vUv; out vec4 frag;
+    uniform sampler2D uTex; uniform vec2 uRes; uniform float uSeed;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453 + uSeed); }
+    void main(){ vec2 px=1.0/uRes;
+      float a=texture(uTex,vUv).r;
+      float ax = texture(uTex, vUv+vec2(px.x,0.)).r - texture(uTex, vUv-vec2(px.x,0.)).r;
+      float ay = texture(uTex, vUv+vec2(0.,px.y)).r - texture(uTex, vUv-vec2(0.,px.y)).r;
+      float edge = smoothstep(0.05, 0.25, length(vec2(ax,ay)));
+      float halo = edge*0.35;
+      float grain = (hash(vUv*uRes.xy) - 0.5) * 0.06;
+      float outA = clamp(a + halo + grain, 0.0, 1.0);
+      frag = vec4(vec3(outA), outA);
+    }\`;
+    const progHalo = prog(fsHalo);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    pass(texA, progDisp, ()=>{ gl.uniform1i(gl.getUniformLocation(progDisp,"uTex"),0);
+      gl.uniform2f(gl.getUniformLocation(progDisp,"uRes"),size,size);
+      gl.uniform1f(gl.getUniformLocation(progDisp,"uSeed"),seed);
+      gl.uniform1f(gl.getUniformLocation(progDisp,"uAmt"),22.0); });
+    gl.bindTexture(gl.TEXTURE_2D, texA);
+    pass(texB, progHalo, ()=>{ gl.uniform1i(gl.getUniformLocation(progHalo,"uTex"),0);
+      gl.uniform2f(gl.getUniformLocation(progHalo,"uRes"),size,size);
+      gl.uniform1f(gl.getUniformLocation(progHalo,"uSeed"),seed*0.123); });
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texB, 0);
+    const pixels=new Uint8Array(size*size*4);
+    gl.readPixels(0,0,size,size,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    const out = new OffscreenCanvas(size,size); const og=out.getContext("2d");
+    const imgData = new ImageData(new Uint8ClampedArray(pixels), size, size);
+    og.putImageData(imgData,0,0);
+    const bmp = await createImageBitmap(out);
+    self.postMessage({ok:true, bitmap:bmp}, [bmp]);
+  }catch(err){ self.postMessage({ok:false, error:String(err)}); }
+};
+`;
+const workerURL = URL.createObjectURL(new Blob([workerSrc], {type:'application/javascript'}));
+let glWorker=null;
+
+/* ==================== App wiring ==================== */
+function downloadSVG(){
+  const svg=$("#svg").cloneNode(true); svg.removeAttribute("width"); svg.removeAttribute("height");
+  const blob=new Blob([new XMLSerializer().serializeToString(svg)],{type:"image/svg+xml;charset=utf-8"});
+  const a=Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:"logogram-v3.svg"}); a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function render(){
+  const txt=$("#txt").value.trim(); if(!txt) return;
+  const {W,N,R,seed} = renderVector(txt);
+
+  const useGPU = $("#gpuToggle").checked && 'OffscreenCanvas' in window;
+  $("#status").textContent = useGPU ? "rendering (GPU)..." : "vector only";
+  const size = +$("#px").value|0;
+  const ink = $("#ink"); const ctx = ink.getContext("2d");
+  ink.width=size; ink.height=size; ctx.clearRect(0,0,size,size);
+
+  if(!useGPU){ $("#status").textContent = "vector only"; return; }
+
+  if(!glWorker) glWorker = new Worker(workerURL, {type:'module'});
+  glWorker.onmessage = (e)=>{
+    const {ok, bitmap, error} = e.data;
+    if(!ok){ $("#status").textContent = "GPU error"; console.error(error); return; }
+    ctx.clearRect(0,0,size,size);
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    $("#status").textContent = "done";
+  };
+  glWorker.postMessage({cmd:"render", size, weights:Array.from(W), N, R, seed, Smax:+$("#smax").value});
+}
+
+/* Decode helpers */
+function decodeCurrent(){
+  try{ const p=decodeLogogram($("#svg")); $("#decodeOut").textContent = JSON.stringify(p, null, 2); $("#decodeStatus").textContent = "Decoded current"; $("#decodeDetails").open = true; }
+  catch(e){ $("#decodeOut").textContent = "Decode error: "+e.message; $("#decodeStatus").textContent = "Error"; }
+}
+function handleFileDecode(file){
+  const rd=new FileReader();
+  rd.onload=()=>{ try{ const p=decodeLogogram(String(rd.result)); $("#decodeOut").textContent = JSON.stringify(p, null, 2); $("#decodeStatus").textContent = "Decoded file"; $("#decodeDetails").open = true; }
+  catch(e){ $("#decodeOut").textContent = "Decode error: "+e.message; $("#decodeStatus").textContent = "Error"; } };
+  rd.readAsText(file);
+}
+
+/* Cinematic toggle (fog/parallax/reflection) */
+(function(){
+  const vw = document.getElementById('viewport');
+  function onMove(e){
+    const r=vw.getBoundingClientRect();
+    const nx=(e.clientX-r.left)/r.width - 0.5;
+    const ny=(e.clientY-r.top)/r.height - 0.5;
+    document.documentElement.style.setProperty("--parx",(nx*4).toFixed(3));
+    document.documentElement.style.setProperty("--pary",(ny*3).toFixed(3));
+  }
+  function enableCine(on){
+    document.body.classList.toggle('cinematic', !!on);
+    if(on){ vw.addEventListener('pointermove', onMove); }
+    else { vw.removeEventListener('pointermove', onMove); document.documentElement.style.setProperty("--parx","0"); document.documentElement.style.setProperty("--pary","0"); }
+  }
+  document.getElementById('cineToggle').addEventListener('change', e=> enableCine(e.target.checked));
+  enableCine(true);
+})();
+
+/* Events */
+document.getElementById('go').addEventListener('click', render);
+document.getElementById('dl').addEventListener('click', downloadSVG);
+document.getElementById('fileInput').addEventListener('change', e=>{ const f=e.target.files?.[0]; if(f) handleFileDecode(f); });
+document.getElementById('copyDecoded').addEventListener('click', async ()=>{
+  try{ await navigator.clipboard.writeText(document.getElementById('decodeOut').textContent||""); document.getElementById('decodeStatus').textContent="Copied"; setTimeout(()=>document.getElementById('decodeStatus').textContent="Idle",1200);}
+  catch{ document.getElementById('decodeStatus').textContent="Copy failed"; setTimeout(()=>document.getElementById('decodeStatus').textContent="Idle",1200); }
+});
+
+/* Boot */
+render();
+</script>
+</body>
+</html>
